@@ -1,19 +1,23 @@
+// client/src/pages/NoteEditorPage.jsx
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/api';
 import ReactMarkdown from 'react-markdown';
 
 const NoteEditorPage = () => {
-  const { id } = useParams();
+  const { id } = useParams(); // <-- id is read here
   const navigate = useNavigate();
 
   const [note, setNote] = useState({
     title: '',
     content: '',
     tags: [],
+    isPinned: false,
   });
 
   const [tagsInput, setTagsInput] = useState('');
+  const [publicUrl, setPublicUrl] = useState(null);
+  const [sharing, setSharing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -21,6 +25,7 @@ const NoteEditorPage = () => {
   const [tab, setTab] = useState('edit');
   const [initialized, setInitialized] = useState(false);
 
+  // fetch the note
   const fetchNote = async () => {
     try {
       setLoading(true);
@@ -37,14 +42,22 @@ const NoteEditorPage = () => {
         title: data.title || '',
         content: data.content || '',
         tags: data.tags || [],
+        isPinned: !!data.isPinned,
       });
 
       setTagsInput((data.tags || []).join(', '));
+      if (data.isPublic && data.publicId) {
+        const base = import.meta.env.VITE_CLIENT_BASE || 'http://localhost:5173';
+        setPublicUrl(`${base}/share/${data.publicId}`);
+      } else {
+        setPublicUrl(null);
+      }
+
       setInitialized(true);
     } catch (err) {
       console.error('Error fetching note', err);
       setLoadError(
-        err.response?.status === 404
+        err?.response?.status === 404
           ? 'Note not found.'
           : 'Failed to load note. Check console for details.'
       );
@@ -56,28 +69,18 @@ const NoteEditorPage = () => {
   useEffect(() => {
     if (!id) return;
     fetchNote();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const handleTitleChange = (e) => {
-    const value = e.target.value;
-    setNote((prev) => ({ ...prev, title: value }));
-  };
+  const handleTitleChange = (e) => setNote((prev) => ({ ...prev, title: e.target.value }));
+  const handleContentChange = (e) => setNote((prev) => ({ ...prev, content: e.target.value }));
+  const handleTagsChange = (e) => setTagsInput(e.target.value);
 
-  const handleContentChange = (e) => {
-    const value = e.target.value;
-    setNote((prev) => ({ ...prev, content: value }));
-  };
-
-  const handleTagsChange = (e) => {
-    setTagsInput(e.target.value);
-  };
-
-  const parseTags = () => {
-    return tagsInput
+  const parseTags = () =>
+    tagsInput
       .split(',')
       .map((t) => t.trim())
       .filter(Boolean);
-  };
 
   const saveNote = async () => {
     try {
@@ -99,6 +102,7 @@ const NoteEditorPage = () => {
     }
   };
 
+  // autosave effect
   useEffect(() => {
     if (!initialized) return;
     setAutoSaveStatus('saving');
@@ -111,44 +115,117 @@ const NoteEditorPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.title, note.content, tagsInput]);
 
-  const handleManualSave = async () => {
-    await saveNote();
-  };
+  const handleManualSave = async () => await saveNote();
 
+  // delete => move to Trash (soft delete)
   const handleDelete = async () => {
     if (!window.confirm('Delete this note?')) return;
     try {
-      await api.delete(`/api/notes/${id}`);
+      await api.post(`/api/notes/${id}/trash`);
       navigate('/notes');
     } catch (err) {
-      console.error('Error deleting note', err);
-      alert('Failed to delete note. Check console for details.');
+      console.error('Error moving note to Trash', err);
+      alert('Failed to move note to Trash. Check console.');
     }
   };
 
-  const renderStatus = () => {
-    if (autoSaveStatus === 'saving') return 'Saving...';
-    if (autoSaveStatus === 'saved') return 'All changes saved';
-    if (autoSaveStatus === 'error') return 'Error while saving';
-    return '';
+  // Toggle pin from editor
+  const handleTogglePinEditor = async () => {
+    try {
+      // optimistic update
+      setNote((prev) => ({ ...prev, isPinned: !prev.isPinned }));
+      await api.post(`/api/notes/${id}/toggle-pin`);
+      // refresh
+      fetchNote();
+    } catch (err) {
+      console.error('Failed to toggle pin from editor', err);
+      alert('Failed to toggle pin. Check console.');
+      fetchNote();
+    }
   };
 
-  if (loading) {
-    return <div style={{ padding: '20px' }}>Loading note...</div>;
-  }
+  // Share / Unshare handlers
+  const handleShare = async () => {
+    try {
+      setSharing(true);
+      const res = await api.post(`/api/notes/${id}/share`);
+      setPublicUrl(res.data.publicUrl);
+      alert('Public link created. You can copy it now.');
+    } catch (err) {
+      console.error('Share failed', err);
+      alert('Failed to create share link. Check console.');
+    } finally {
+      setSharing(false);
+    }
+  };
 
-  if (loadError) {
-    return (
-      <div style={{ padding: '20px' }}>
-        <p style={{ color: 'red' }}>{loadError}</p>
-        <button onClick={() => navigate('/notes')}>Back to notes</button>
-      </div>
-    );
-  }
+  const handleUnshare = async () => {
+    if (!window.confirm('Disable public link?')) return;
+    try {
+      await api.post(`/api/notes/${id}/unshare`);
+      setPublicUrl(null);
+      alert('Public link disabled.');
+    } catch (err) {
+      console.error('Unshare failed', err);
+      alert('Failed to disable share. Check console.');
+    }
+  };
+
+  const handleCopyPublicUrl = async () => {
+    if (!publicUrl) return;
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      alert('Copied public link to clipboard');
+    } catch {
+      alert('Could not copy to clipboard — manually copy the link.');
+    }
+  };
+
+  // ---------- PDF download handler (fixed: uses `id` from useParams and `note` state) ----------
+  const handleDownloadPdf = async () => {
+    try {
+      // fetch the PDF from server endpoint (protected)
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/notes/${id}/pdf`, {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : ''
+        }
+      });
+
+      if (!res.ok) {
+        // try to read error JSON for helpful message
+        let body = null;
+        try { body = await res.json(); } catch (e) {}
+        throw new Error(body?.message || `Failed to generate PDF (${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(note.title || 'note').replace(/[^a-z0-9_\-]/gi, '_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('PDF download error', err);
+      alert(`Failed to generate PDF: ${err.message}`);
+    }
+  };
+
+  if (loading) return <div style={{ padding: '20px' }}>Loading note...</div>;
+  if (loadError) return (
+    <div style={{ padding: '20px' }}>
+      <p style={{ color: 'red' }}>{loadError}</p>
+      <button onClick={() => navigate('/notes')}>Back to notes</button>
+    </div>
+  );
 
   return (
     <div style={{ padding: '20px' }}>
-      <div>
+      {/* Title row with pin button */}
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
         <input
           type="text"
           name="title"
@@ -158,16 +235,29 @@ const NoteEditorPage = () => {
           style={{
             fontSize: '1.4rem',
             width: '100%',
-            marginBottom: '10px',
             padding: '8px',
             borderRadius: '6px',
             border: '1px solid #ddd',
           }}
         />
+        <button
+          onClick={handleTogglePinEditor}
+          title={note.isPinned ? 'Unpin note' : 'Pin note'}
+          style={{
+            padding: '8px 10px',
+            borderRadius: '6px',
+            border: '1px solid #ddd',
+            background: note.isPinned ? '#fff7ed' : '#f3f4f6',
+            cursor: 'pointer',
+          }}
+        >
+          {note.isPinned ? '📌 Pinned' : '📍 Pin'}
+        </button>
       </div>
 
+      {/* Tags input */}
       <div style={{ marginBottom: '10px' }}>
-        <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.9rem' }}>
+        <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.9rem' }}>
           Tags (comma separated)
         </label>
         <input
@@ -177,23 +267,33 @@ const NoteEditorPage = () => {
           placeholder="work, ideas, personal"
           style={{
             width: '100%',
-            padding: '6px',
+            padding: '8px',
             borderRadius: '6px',
             border: '1px solid #ddd',
-            fontSize: '0.9rem',
+            fontSize: '0.95rem',
           }}
         />
       </div>
 
-      <div
-        style={{
-          marginBottom: '10px',
-          display: 'flex',
-          gap: '8px',
-          alignItems: 'center',
-        }}
-      >
+      {/* Share controls */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+        {publicUrl ? (
+          <>
+            <input readOnly value={publicUrl} style={{ flex: 1, padding: '6px', border: '1px solid #ddd', borderRadius: '6px' }} />
+            <button onClick={handleCopyPublicUrl}>Copy</button>
+            <button onClick={handleUnshare} style={{ background: 'red', color: 'white' }}>Disable</button>
+          </>
+        ) : (
+          <button onClick={handleShare} disabled={sharing}>
+            {sharing ? 'Sharing...' : 'Create public link'}
+          </button>
+        )}
+      </div>
+
+      {/* PDF + Tabs + status */}
+      <div style={{ marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
         <div>
+          <button onClick={handleDownloadPdf} style={{ marginRight: 8 }}>Download PDF</button>
           <button
             type="button"
             onClick={() => setTab('edit')}
@@ -222,10 +322,11 @@ const NoteEditorPage = () => {
         </div>
 
         <div style={{ marginLeft: 'auto', fontSize: '0.85rem', color: '#6b7280' }}>
-          {renderStatus()}
+          {autoSaveStatus === 'saving' ? 'Saving...' : autoSaveStatus === 'saved' ? 'All changes saved' : autoSaveStatus === 'error' ? 'Error while saving' : ''}
         </div>
       </div>
 
+      {/* Editor / Preview */}
       {tab === 'edit' ? (
         <textarea
           name="content"
@@ -235,17 +336,18 @@ const NoteEditorPage = () => {
           rows={20}
           style={{
             width: '100%',
-            padding: '10px',
+            padding: '12px',
             borderRadius: '6px',
             border: '1px solid #ddd',
             fontFamily: 'monospace',
+            fontSize: '0.95rem',
           }}
         />
       ) : (
         <div
           style={{
             minHeight: '200px',
-            padding: '10px',
+            padding: '12px',
             borderRadius: '6px',
             border: '1px solid #ddd',
             background: '#f9fafb',
@@ -259,18 +361,21 @@ const NoteEditorPage = () => {
         </div>
       )}
 
-      <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
-        <button onClick={handleManualSave} disabled={saving}>
+      {/* Actions */}
+      <div style={{ marginTop: '14px', display: 'flex', gap: '10px' }}>
+        <button onClick={handleManualSave} disabled={saving} style={{ padding: '8px 12px' }}>
           {saving ? 'Saving...' : 'Save now'}
         </button>
+
         <button
           onClick={handleDelete}
           style={{
             color: 'white',
             background: 'red',
             border: 'none',
-            padding: '6px 10px',
-            borderRadius: '4px',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            cursor: 'pointer',
           }}
         >
           Delete

@@ -13,24 +13,39 @@ const Navbar = () => {
 
   return (
     <nav style={{ padding: '10px 20px', borderBottom: '1px solid #ddd' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <Link to={isAuthenticated ? '/notes' : '/login'} style={{ textDecoration: 'none' }}>
-          <strong>MyNotes</strong>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        
+        {/* Left side logo */}
+        <Link
+          to={isAuthenticated ? '/notes' : '/login'}
+          style={{ textDecoration: 'none', fontWeight: 'bold', fontSize: '1.2rem' }}
+        >
+          MyNotes
         </Link>
-        <div>
+
+        {/* Right side navigation */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          
           {isAuthenticated ? (
             <>
-              <span style={{ marginRight: '10px' }}>
-                {user?.name || user?.email}
-              </span>
+              {/* Links for authenticated user */}
+              <Link to="/notes" style={{ textDecoration: 'none' }}>Notes</Link>
+              <Link to="/trash" style={{ textDecoration: 'none' }}>Trash</Link>
+
+              {/* User name */}
+              <span>{user?.name || user?.email}</span>
+
+              {/* Logout button */}
               <button onClick={handleLogout}>Logout</button>
             </>
           ) : (
             <>
-              <Link to="/login" style={{ marginRight: '10px' }}>Login</Link>
-              <Link to="/register">Register</Link>
+              {/* Links when logged out */}
+              <Link to="/login" style={{ textDecoration: 'none' }}>Login</Link>
+              <Link to="/register" style={{ textDecoration: 'none' }}>Register</Link>
             </>
           )}
+
         </div>
       </div>
     </nav>
@@ -38,3 +53,4 @@ const Navbar = () => {
 };
 
 export default Navbar;
+

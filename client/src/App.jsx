@@ -7,6 +7,8 @@ import RegisterPage from './pages/RegisterPage';
 import NotesPage from './pages/NotesPage';
 import NoteEditorPage from './pages/NoteEditorPage';
 import Navbar from './components/Navbar';
+import TrashPage from './pages/TrashPage';
+import ShareView from './pages/ShareView';
 
 const App = () => {
   const { isAuthenticated } = useAuth();
@@ -48,6 +50,13 @@ const App = () => {
             path="/notes/:id"
             element={isAuthenticated ? <NoteEditorPage /> : <Navigate to="/login" />}
           />
+          <Route
+            path="/trash"
+            element={isAuthenticated ? <TrashPage /> : <Navigate to="/login" />}
+          />
+
+          {/* Public shared view (no auth) */}
+          <Route path="/share/:publicId" element={<ShareView />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" />} />
